@@ -47,7 +47,7 @@ import io.reactivex.subjects.Subject;
 public class AdsManager {
 
     private static final String TAG = "AdsManager";
-    private static boolean showAdsOnDebug = false;
+    private static boolean showAdsOnDebug = true;
     private final boolean debug;
     private final Application application;
     private final Subject<AdsEvent> eventSubject = PublishSubject.create();
