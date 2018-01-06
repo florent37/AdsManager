@@ -13,8 +13,7 @@ public class MainApplication extends Application {
     public void onCreate() {
         super.onCreate();
         adsManager = new AdsManager(this, R.string.admob_app, BuildConfig.DEBUG);
-
-        AdsManager.showAdsOnDebug(true);
+        adsManager.showAdsOnDebug(true);
         adsManager.setAdInvisibilityOnDebug(View.INVISIBLE);
     }
 

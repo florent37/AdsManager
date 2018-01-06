@@ -4,10 +4,7 @@ import android.app.Application;
 import android.arch.lifecycle.Lifecycle;
 import android.arch.lifecycle.LifecycleOwner;
 import android.content.Context;
-import android.os.Handler;
-import android.os.Looper;
 import android.provider.Settings;
-import android.support.annotation.Nullable;
 import android.support.annotation.StringRes;
 import android.util.Log;
 import android.view.View;
@@ -32,17 +29,10 @@ import florent37.github.com.rxlifecycle.RxLifecycle;
 import io.reactivex.Single;
 import io.reactivex.SingleEmitter;
 import io.reactivex.SingleOnSubscribe;
-import io.reactivex.SingleSource;
-import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.annotations.NonNull;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.Consumer;
-import io.reactivex.functions.Function;
-import io.reactivex.functions.Predicate;
-import io.reactivex.schedulers.Schedulers;
-import io.reactivex.subjects.PublishSubject;
-import io.reactivex.subjects.Subject;
 
 public class AdsManager {
 
@@ -50,8 +40,6 @@ public class AdsManager {
     private static boolean showAdsOnDebug = true;
     private final boolean debug;
     private final Application application;
-    private final Subject<AdsEvent> eventSubject = PublishSubject.create();
-    private final Subject<AdsVideoEvent> eventVideoSubject = PublishSubject.create();
     protected List<AdView> adViewList = new ArrayList<>();
     private boolean enableLogs = true;
     private int adInvisibilityOnDebug = View.INVISIBLE;
@@ -66,8 +54,9 @@ public class AdsManager {
         this(application, application.getString(admobApp), debug);
     }
 
-    public static void showAdsOnDebug(boolean showAdsOnDebug) {
-        AdsManager.showAdsOnDebug = showAdsOnDebug;
+    public AdsManager showAdsOnDebug(boolean showAdsOnDebug) {
+        showAdsOnDebug = showAdsOnDebug;
+        return this;
     }
 
     public void setEnableLogs(boolean enableLogs) {
@@ -78,45 +67,46 @@ public class AdsManager {
         this.adInvisibilityOnDebug = adVisibilityOnDebug;
     }
 
-    private AdsManager showInterstitial(final int stringId, final AdClosedListener adCloseListener) {
-        if (debug && !showAdsOnDebug) {
-            adCloseListener.onAdClosed();
-        } else {
-            final String string = application.getString(stringId);
-
-            log("showInterstitial push event " + string);
-
-            eventSubject.onNext(new AdsEvent(string, adCloseListener));
-        }
-        return this;
-    }
-
-    private AdsManager showRewardedVideo(final int stringId, final AdVideoClosedListener adVideoClosedListener) {
-        if (!showAdsOnDebug && debug) {
-            adVideoClosedListener.onAdClosedWithReward();
-        } else {
-            eventVideoSubject.onNext(new AdsVideoEvent(application.getString(stringId), adVideoClosedListener));
-        }
-        return this;
-    }
-
-    public Single<Boolean> loadInterstitial(final int stringId) {
-        return loadInterstitial(application.getString(stringId));
-    }
-
-    public Single<Boolean> loadAndShowInterstitial(final int stringId) {
+    public Single<Boolean> loadAndShowInterstitial(final int id) {
         if (!showAdsOnDebug && debug) {
             return Single.just(true);
         } else {
-            return loadInterstitial(application.getString(stringId))
-                    .flatMap(new Function<Boolean, SingleSource<? extends Boolean>>() {
+            return Single.create(new SingleOnSubscribe<Boolean>() {
+                @Override
+                public void subscribe(final SingleEmitter<Boolean> e) throws Exception {
+                    final InterstitialAd interstitialAd = new InterstitialAd(application);
+                    final AdRequest.Builder adRequestBuilder = new AdRequest.Builder();
+                    adRequestBuilder.addTestDevice(AdRequest.DEVICE_ID_EMULATOR);
+                    if (debug) {
+                        adRequestBuilder.addTestDevice(DeviceIdFounder.getDeviceId(application));
+                    }
+                    interstitialAd.setAdUnitId(application.getString(id));
+
+                    interstitialAd.setAdListener(new AdListener() {
+
                         @Override
-                        public SingleSource<? extends Boolean> apply(@NonNull Boolean ok) throws Exception {
-                            AdsManager.this.log("loadAndShowInterstitial " + ok);
-                            if (ok) return AdsManager.this.showInterstitial(stringId);
-                            else return Single.just(ok);
+                        public void onAdLoaded() {
+                            super.onAdLoaded();
+                            interstitialAd.show();
+                        }
+
+                        @Override
+                        public void onAdFailedToLoad(int i) {
+                            super.onAdFailedToLoad(i);
+                            log("onAdFailedToLoad " + i);
+                            e.onError(new AdError());
+                        }
+
+                        @Override
+                        public void onAdClosed() {
+                            super.onAdClosed();
+                            log("onAdClosed");
+                            e.onSuccess(true);
                         }
                     });
+                    interstitialAd.loadAd(adRequestBuilder.build());
+                }
+            });
         }
     }
 
@@ -124,136 +114,6 @@ public class AdsManager {
         if (enableLogs) {
             Log.d(TAG, text);
         }
-    }
-
-    private Single<Boolean> loadInterstitial(final String id) {
-
-        log("loadInterstitial " + id);
-
-        return Single.create(new SingleOnSubscribe<Boolean>() {
-            @Override
-            public void subscribe(@NonNull final SingleEmitter<Boolean> e) throws Exception {
-                new Handler(Looper.getMainLooper()).post(new Runnable() {
-                    @Override
-                    public void run() {
-                        final InterstitialAd interstitialAd = new InterstitialAd(application);
-                        final AdRequest.Builder adRequestBuilder = new AdRequest.Builder();
-                        adRequestBuilder.addTestDevice(AdRequest.DEVICE_ID_EMULATOR);
-                        if (debug) {
-                            adRequestBuilder.addTestDevice(DeviceIdFounder.getDeviceId(application));
-                        }
-                        interstitialAd.setAdUnitId(id);
-
-                        interstitialAd.setAdListener(new AdListener() {
-
-                            @Nullable
-                            private AdClosedListener adClosedListener;
-
-                            @Override
-                            public void onAdLoaded() {
-                                super.onAdLoaded();
-                                log("onAdLoaded");
-
-                                log("wait event " + id);
-
-                                eventSubject
-                                        //on attend un event "show(id)"
-                                        .filter(new Predicate<AdsEvent>() {
-                                            @Override
-                                            public boolean test(@NonNull AdsEvent adsEvent) throws Exception {
-                                                return adsEvent.getAdId().equals(id);
-                                            }
-                                        })
-                                        .doOnNext(new Consumer<AdsEvent>() {
-                                            @Override
-                                            public void accept(@NonNull AdsEvent adsEvent) throws Exception {
-                                                log("eventSubject");
-                                                adClosedListener = adsEvent.getAdCloseListener();
-                                            }
-                                        })
-                                        .subscribeOn(Schedulers.newThread())
-                                        .observeOn(AndroidSchedulers.mainThread())
-                                        .subscribe(new Consumer<AdsEvent>() {
-                                            @Override
-                                            public void accept(@NonNull AdsEvent adsEvent) throws Exception {
-                                                interstitialAd.show();
-                                            }
-                                        });
-                                e.onSuccess(true);
-                            }
-
-                            @Override
-                            public void onAdFailedToLoad(int i) {
-                                super.onAdFailedToLoad(i);
-                                log("onAdFailedToLoad " + i);
-                                e.onSuccess(false);
-                                if (adClosedListener != null) {
-                                    adClosedListener.onAdClosed();
-                                    loadInterstitial(id).subscribe();
-                                }
-                            }
-
-                            @Override
-                            public void onAdClosed() {
-                                super.onAdClosed();
-                                log("onAdClosed");
-                                if (adClosedListener != null) {
-                                    adClosedListener.onAdClosed();
-                                }
-                                loadInterstitial(id).subscribe();
-                            }
-                        });
-                        interstitialAd.loadAd(adRequestBuilder.build());
-                    }
-                });
-            }
-        });
-    }
-
-    public Single<Boolean> showInterstitial(final int stringId) {
-        return Single.create(new SingleOnSubscribe<Boolean>() {
-            @Override
-            public void subscribe(@NonNull final SingleEmitter<Boolean> e) throws Exception {
-                new Handler(Looper.getMainLooper()).postDelayed(
-                        new Runnable() {
-                            @Override
-                            public void run() {
-                                AdsManager.this.showInterstitial(stringId, new AdClosedListener() {
-                                    @Override
-                                    public void onAdClosed() {
-                                        AdsManager.this.log("showInterstitial finished");
-                                        e.onSuccess(true);
-                                    }
-                                });
-                            }
-                        }, 100
-                );
-            }
-        });
-    }
-
-    public Single<Boolean> showRewardedVideo(final int stringId) {
-        return Single.create(new SingleOnSubscribe<Boolean>() {
-            @Override
-            public void subscribe(@NonNull final SingleEmitter<Boolean> e) throws Exception {
-                new Handler(Looper.getMainLooper()).post(new Runnable() {
-                    @Override
-                    public void run() {
-                        AdsManager.this.showRewardedVideo(stringId, new AdVideoClosedListener() {
-                            @Override
-                            public void onAdClosedWithReward() {
-                                e.onSuccess(true);
-                            }
-
-                            @Override
-                            public void onAdClosedWithoutReward() {
-                                e.onSuccess(false);
-                            }
-                        });
-                    }
-                });
-            }
-        });
     }
 
     public void executeAdView(final LifecycleOwner lifecycleOwner, final AdView adView) {
@@ -317,11 +177,7 @@ public class AdsManager {
         }
     }
 
-    private Single<Boolean> loadRewardedVideo(final int stringId) {
-        return loadRewardedVideo(application.getString(stringId));
-    }
-
-    private Single<Boolean> loadRewardedVideo(final String id) {
+    private Single<Boolean> loadAndshowRewardedVideo(final String id) {
         return Single.create(new SingleOnSubscribe<Boolean>() {
             @Override
             public void subscribe(@NonNull final SingleEmitter<Boolean> e) throws Exception {
@@ -330,33 +186,9 @@ public class AdsManager {
 
                     boolean rewarded = false;
 
-                    @Nullable
-                    private AdVideoClosedListener adVideoClosedListener;
-
                     @Override
                     public void onRewardedVideoAdLoaded() {
-                        eventVideoSubject
-                                .filter(new Predicate<AdsVideoEvent>() {
-                                    @Override
-                                    public boolean test(@NonNull AdsVideoEvent adsVideoEvent) throws Exception {
-                                        return adsVideoEvent.getAdId().equals(id);
-                                    }
-                                })
-                                .doOnNext(new Consumer<AdsVideoEvent>() {
-                                    @Override
-                                    public void accept(@NonNull AdsVideoEvent adsVideoEvent) throws Exception {
-                                        adVideoClosedListener = adsVideoEvent.getAdVideoClosedListener();
-                                    }
-                                })
-                                .subscribeOn(Schedulers.newThread())
-                                .observeOn(AndroidSchedulers.mainThread())
-                                .subscribe(new Consumer<AdsVideoEvent>() {
-                                    @Override
-                                    public void accept(@NonNull AdsVideoEvent adsVideoEvent) throws Exception {
-                                        mAd.show();
-                                    }
-                                });
-                        e.onSuccess(true);
+                        mAd.show();
                     }
 
                     @Override
@@ -371,15 +203,7 @@ public class AdsManager {
 
                     @Override
                     public void onRewardedVideoAdClosed() {
-                        if (adVideoClosedListener != null) {
-                            if (rewarded) {
-                                adVideoClosedListener.onAdClosedWithReward();
-                            } else {
-                                adVideoClosedListener.onAdClosedWithoutReward();
-                            }
-
-                            loadRewardedVideo(id);
-                        }
+                        e.onSuccess(rewarded);
                     }
 
                     @Override
@@ -394,11 +218,7 @@ public class AdsManager {
 
                     @Override
                     public void onRewardedVideoAdFailedToLoad(int i) {
-                        if (adVideoClosedListener != null) {
-                            adVideoClosedListener.onAdClosedWithoutReward();
-                        }
-                        loadRewardedVideo(id);
-                        e.onSuccess(false);
+                        e.onError(new AdError());
                     }
                 });
 
@@ -423,16 +243,6 @@ public class AdsManager {
 
     public void insertAdView(LifecycleOwner lifecycleOwner, ViewGroup adContainer, @StringRes int adUnitId, AdSize adSize) {
         insertAdView(lifecycleOwner, adContainer, application.getString(adUnitId), adSize);
-    }
-
-    public interface AdClosedListener {
-        void onAdClosed();
-    }
-
-    public interface AdVideoClosedListener {
-        void onAdClosedWithReward();
-
-        void onAdClosedWithoutReward();
     }
 
     public static class DeviceIdFounder {
@@ -463,42 +273,6 @@ public class AdsManager {
                 e.printStackTrace();
             }
             return "";
-        }
-    }
-
-    private class AdsEvent {
-        private final String adId;
-        private final AdClosedListener adCloseListener;
-
-        public AdsEvent(String adId, AdClosedListener adCloseListener) {
-            this.adId = adId;
-            this.adCloseListener = adCloseListener;
-        }
-
-        public String getAdId() {
-            return adId;
-        }
-
-        public AdClosedListener getAdCloseListener() {
-            return adCloseListener;
-        }
-    }
-
-    private class AdsVideoEvent {
-        private final String adId;
-        private final AdVideoClosedListener adVideoClosedListener;
-
-        public AdsVideoEvent(String adId, AdVideoClosedListener adVideoClosedListener) {
-            this.adId = adId;
-            this.adVideoClosedListener = adVideoClosedListener;
-        }
-
-        public String getAdId() {
-            return adId;
-        }
-
-        public AdVideoClosedListener getAdVideoClosedListener() {
-            return adVideoClosedListener;
         }
     }
 
