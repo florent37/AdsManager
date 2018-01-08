@@ -29,6 +29,7 @@ import florent37.github.com.rxlifecycle.RxLifecycle;
 import io.reactivex.Single;
 import io.reactivex.SingleEmitter;
 import io.reactivex.SingleOnSubscribe;
+import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.annotations.NonNull;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposable;
@@ -106,7 +107,8 @@ public class AdsManager {
                     });
                     interstitialAd.loadAd(adRequestBuilder.build());
                 }
-            });
+            })
+                    .subscribeOn(AndroidSchedulers.mainThread());
         }
     }
 

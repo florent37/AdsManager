@@ -11,7 +11,7 @@
 [ ![Download](https://api.bintray.com/packages/florent37/maven/adsmanager/images/download.svg) ](https://bintray.com/florent37/maven/adsmanager/_latestVersion)
 ```java
 dependencies {
-    compile 'com.github.florent37:adsmanager:1.0.2'
+    compile 'com.github.florent37:adsmanager:1.0.3'
 }
 ```
 
